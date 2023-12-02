@@ -1,2 +1,3 @@
 # Random-forest-model-for-prediction-of-users-review-using-text-mining
-This study will use data from yelp to predict the users' ratings on businesses by constructing a random forest model.
+This study will use data from yelp to predict the users' ratings on businesses by constructing a random forest model. The dataset based on this study is from Yelp: https://www.yelp.com/dataset
+
