@@ -1,0 +1,428 @@
+---
+title: "Random Forest Model on Prediction of Users' Reviews Using Text Mining"
+output:
+  word_document: default
+  pdf_document: default
+  html_document:
+    theme: cerulean
+---
+
+2023-12-02
+
+Student ID: U2016609
+
+------------------------------------------------------------------------
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+```{r library and working directory, include=FALSE}
+###i cleaned and data and signed a new variable score after using sentiment analysis, and then save the new dataset, for simplicity, i will directly load the new dataset (everything i did to creat the new dataset are illustrated without running the code), otherwise it will take too long to run.###
+library("sentimentr")
+library("stringr")
+library("plyr")
+library(caret)
+library(RColorBrewer)
+library(scales)
+library(text)
+library(ggplot2)
+library(randomForestExplainer)
+library(glmnet)
+library(Matrix)
+library(rpart)
+library(DiagrammeR)
+library(rpart.plot)
+library(ada)
+library(webshot)
+library(dplyr)
+library(knitr)
+library(wordcloud)
+library(randomForest)
+library(jsonlite)
+library(tm)
+#load("~/Desktop/yelp_review_small.Rda")
+#load("~/Desktop/yelp_user_small.Rda")
+#business_data <- stream_in(file("yelp_academic_dataset_business.json"))
+load("~/Desktop/sentiment_data.RData")
+#setwd("~/Desktop")
+```
+
+**Tabula statement**\
+We're part of an academic community at Warwick. Whether studying, teaching, or researching, we're all taking part in an expert conversation which must meet standards of academic integrity. When we all meet these standards, we can take pride in our own academic achievements, as individuals and as an academic community. Academic integrity means committing to honesty in academic work, giving credit where we've used others' ideas and being proud of our own achievements. In submitting my work I confirm that:
+
+1\. I have read the guidance on academic integrity provided in the Student Handbook and understand the University regulations in relation to Academic Integrity. I am aware of the potential consequences of Academic Misconduct.
+
+2\. I declare that the work is all my own, except where I have stated otherwise.
+
+3\. No substantial part(s) of the work submitted here has also been submitted by me in other credit bearing assessments courses of study (other than in certain cases of a resubmission of a piece of work), and I acknowledge that if this has been done this may lead to an appropriate sanction.
+
+4\. Where a generative Artificial Intelligence such as ChatGPT has been used I confirm I have abided by both the University guidance and specific requirements as set out in the Student Handbook and the Assessment brief. I have clearly acknowledged the use of any generative Artificial Intelligence in my submission, my reasoning for using it and which generative AI (or AIs) I have used. Except where indicated the work is otherwise entirely my own.
+
+5\. I understand that should this piece of work raise concerns requiring investigation in relation to any of points above, it is possible that other work I have submitted for assessment will be checked, even if marks (provisional or confirmed) have been published.
+
+6\. Where a proof-reader, paid or unpaid was used, I confirm that the proofreader was made aware of and has complied with the University's proofreading policy.
+
+7\. I consent that my work may be submitted to Turnitin or other analytical technology. I understand the use of this service (or similar), along with other methods of maintaining the integrity of the academic process, will help the University uphold academic standards and assessment fairness.
+
+**Privacy statement**\
+The data on this form relates to your submission of coursework. The date and time of your submission, your identity, and the work you have submitted will be stored. We will only use this data to administer and record your coursework submission.\
+Related articles Reg. 11\
+Academic Integrity (from 4 Oct 2021)\
+Guidance on Regulation 11 Proofreading Policy\
+Education Policy and Quality Team Academic Integrity (warwick.ac.uk)\
+
+# Introduction
+
+The internet enables individuals to share their opinions by posting text on various platforms. It becomes crucial for businesses to analyse users' reviews since it can improve their service quality based on the analysis by establishing relevant strategies.
+
+#### *OSEMN framework*
+
+This paper will base on the OSEMN framework (Obtain, Scrub, Explore, Model, and iNterpret) to predict Yelp users' ratings on businesses. OSEMN is a data science methodology which prioritizes a direct route to model analysis with efficiency and less preliminary business understanding process (Saltz, Sutherland and Hotz 2022). The focus is to construct and select models. Selecting model should be paid caution to since the Yelp ratings can be considered as categorical, which are incompatible with some linear models. Additionally, the consumers' reviews are text contents, so the computational algorithms is needed for model construction. OSEMN framework satisfies this priority.Thus, this paper uses classification random forest models with text mining to predict users' reviews on Yelp.\
+
+# Methodology
+
+### ***A. Obtain and Scrub***
+
+The original datasets are available on the Yelp website (Yelp, 2019). It contains ratings and other relevant information about users and businesses. Some sample data are randomly drawn for quicker processing. After taking the overlap and merging three of the original datasets, dropping all the missing values and the variables extremely skewed, a sample size of 279,878 data was generated.\
+
+### ***B. Explore***
+
+#### *summary statistics*
+
+To capture the features of the variables that will be included in the model, summary statistics is shown as follows:\
+
+```{r clean and summary stats, eval=FALSE, include=FALSE}
+###Obtain and Scrub: clean the data, summary statistics,visualization###
+mergedata<-merge(review_data_small,user_data_small, by ="user_id", all=F)
+mergedata1<-merge(business_data,mergedata,by="business_id",all=F)
+dataclean <- mergedata1 %>%select_if(~!any(is.na(.)))
+summary<-summary(dataclean)
+kable(summary,caption="Summary Statistics")
+datareview <- dataclean %>% select(-c("name.x", "address","city","state","postal_code","review_id","date","yelping_since","elite","friends","compliment_profile","compliment_more","useful.y","funny.y","cool.y","name.y","compliment_cute","compliment_list","compliment_photos","compliment_writer","compliment_note"))
+
+```
+
+|        variable        |  Min   |  Max   | Median |  Mean  |
+|:----------------------:|:------:|:------:|:------:|:------:|
+|     ***stars.y***      |   1    |   5    |   4    |  3.75  |
+|     ***funny.y***      |   0    |  346   |   0    |  0.33  |
+|     ***useful.y***     |   0    |  1182  |   0    |  1.18  |
+|      ***cool.y***      |   0    |  400   |   0    |  0.50  |
+|  ***average_stars***   |   1    |   5    |  3.88  | 3.746  |
+|  ***review_count.y***  |   0    |  8363  |   24   | 114.6  |
+|  ***review_count.x***  |   5    |  568   |  136   |  370   |
+|       ***fans***       |   0    |  2547  |   0    |  11.8  |
+|     ***stars.x***      |   1    |   5    |   4    | 3.751  |
+| ***compliment_plain*** |   0    |  8974  |   0    | 30.34  |
+|     ***latitude***     | 27.56  | 53.65  |  38.6  | 35.89  |
+|    ***longitude***     | -120.1 | -74.66 | -86.18 | -89.64 |
+|     ***is_open***      |   0    |   1    |   1    |  0.83  |
+|       ***text***       |   \\   |   \\   |   \\   |   \\   |
+
+The relevant variables used in this paper are described in the table below:\
+
+|       Variables        |                                             Description                                              |
+|:------------------------:|:--------------------------------------------:|
+|       ***text***       |                                         users' text comments                                         |
+|     ***stars.y***      | the response variable, discrete number range from 1 to 5, means the rates users gave to the business |
+|     ***stars.x***      |                                  the average stars the business got                                  |
+|  ***average_stars***   |                          the average stars the users gave to every business                          |
+|       ***fans***       |                                    the number of fans of the user                                    |
+|  ***review_count.y***  |                       discrete, means the accumulate review count of the user                        |
+|  ***review_count.x***  |                     discrete, means the accumulate review count of the business                      |
+|     ***funny.x***      |                 discrete, meaning the number of users who think the comment is funny                 |
+|     ***useful.x***     |                discrete, meaning the number of users who think the comment is useful                 |
+|      ***cool.x***      |                 discrete, meaning the number of users who think the comment is cool                  |
+|     ***is_open***      |                binary, 1 represents the business is opened while 0 means it is closed                |
+| ***compliment_plain*** |                                     users' information, discrete                                     |
+|    ***longitude***     |                                longitude of the business, continuous                                 |
+|     ***latitude***     |                                 latitude of the business, continuous                                 |
+
+
+#### *Visualization*
+
+The variables with median smaller than mean are skewed to the lower values. In contrast, the median of *stars.y* is bigger than the mean, indicating the data skews towards higher values. As can be seen in the below pie chart, it indicates the portion of each class of stars. Most people rated 5 and 4 stars, while a few people rated 2 and 3.\
+
+```{r piechart of stars, echo=FALSE}
+pie(table(sentiment_data$stars.y),col = brewer.pal(5,"GnBu"), main = "Pie Chart of stars.y")
+```
+
+After the tokenization, a word cloud with decreasing word frequency is presented below. As can be seen, most of the words are positive or neutral.
+
+```{r wordcloud, echo=FALSE, message=FALSE, warning=FALSE}
+index1<-sample(1:nrow(sentiment_data),3000)
+subdata<-sentiment_data[index1,]
+text1<-subdata["text"]
+text1<-as.matrix(text1)
+mycorpus<-Corpus(VectorSource(text1))
+mycorpus <- tm_map(mycorpus,content_transformer(tolower))
+mycorpus <- tm_map(mycorpus, removePunctuation)
+mycorpus <- tm_map(mycorpus,removeWords,stopwords("english"))
+mycorpus <- tm_map(mycorpus, removeNumbers)
+dtm <- DocumentTermMatrix(mycorpus)
+tdm <- TermDocumentMatrix(mycorpus)
+dtmMatrix<-as.matrix(dtm)
+tdm2<-as.matrix(tdm)
+frequency<-colSums(dtmMatrix)
+fre<-sort(frequency, decreasing = TRUE)
+words<-names(fre)
+wordcloud(words[1:80],frequency[1:80],scale=c(5,1),max.word=80,rot.per=0,colors=brewer.pal(8,"RdBu"))
+```
+
+
+
+### ***D. Model***
+
+#### *Random Forest Classification Model 1*
+
+Random forest is a supervised learning algorithm and often be used in regression and classification problems (Karthika, Murugeswari and Manoranjithem, 2019). *M* training samples are constructed to build multiple decision trees which will be merged together to gain a stable value with variance be averaged, where *M* usually equals the square roots of the sample size (Hegde and Padma, 2017). *stars.y* is discrete numeric data with only 5 outcomes, so the prediction should be discrete as well to obtain the precise ratings. Thus, *stars.y* will be treated as categorical variable in classification tree. After drawing 10,000 testing data randomly, the models below are constructed based on the rest of the training data.
+
+```{r split the data, include=FALSE}
+###Explore: split the data into training and testing, preprocessing of the model building###
+sentiment_data1 <- na.omit(sentiment_data)
+set.seed(1)
+index<-sample(1:nrow(sentiment_data1),10000)
+test<- sentiment_data1[index,]
+train<- sentiment_data1[-index,]
+#for classification, let the response variable be factors
+test$stars<-as.factor(test$stars.y)
+train$stars<-as.factor(train$stars.y)
+```
+
+A classification tree model (Class Model 1) is constructed for predicting *stars.y.* Since we can deduced that *stars.y* is correlated with *stars.x* and *average_stars*, these variables will be included. Additionally, *review_count.x, review_count.y, useful.x, funny.x, cool.x, latitude, longitude, is_open, compliment_plain* and *fans* are included to test the importance of the variables.\
+
+```{r forest model 1, eval=FALSE, include=FALSE}
+ClassModel1<-randomForest(stars.y~average_stars+stars.x+review_count.x+fans+review_count.y+useful.x+funny.x+cool.x+latitude+longitude+is_open+compliment_plain,data=train,type="class", ntree=50, importance=T)
+```
+
+```{r importance of the variables, eval=FALSE, include=FALSE}
+varImpPlot(ClassModel1)
+```
+
+![](ClassModel1.png){width="545"}
+
+Gini index represents the node impurity. Summing up the Gini decreases for each individual variable over all trees in the forest gives a variable importance (Hegde and Padma, 2017). In general, the higher value of mean decrease accuracy and mean decrease Gini, the more important the variable is to the model. As can be seen in the graph above, *average_stars* is important to explain the response variable. To improve the model further, text mining will be used for generating sentiment score.\
+
+#### *Text Mining*
+
+Text data presents users' attitudes, it gives implications on the ratings. Text Mining is used for exploring the attitudes. Such as sentiment analysis, a computational study of people's opinions, emotions, and attitudes towards an entity (Medhat, Hassan and Korashy, 2014), can provide sentiment scores according to the negative and positive opinion words in the text. Based on the lexicon corpus provided by Murali (2017), the process of calculate sentiment score is as follows:
+
+```{r flowchart, echo=FALSE, message=FALSE, warning=FALSE}
+DiagrammeR::grViz("digraph {
+
+graph [layout = dot]
+
+node [shape = rectangle, style = filled, fillcolor = Linen]
+
+1 [label = 'Text data', shape = folder, fillcolor = skyblue]
+2 [label = 'Tokenization: sentences were split into words after removing all numbers, punctuations and control characters']
+3 [label = 'Match positive words from lexicon Corpus',shape = oval]
+4 [label = 'Match negative words from lexicon Corpus',shape = oval]
+5 [label = 'Eliminate netural words',shape = oval]
+6 [label= 'Sentiment score = number of positive words - number of negative words']
+7 [label = 'A new variable called score is generated and merged into the dataset']
+# edge definitions with the node IDs
+1 -> 2 -> {3 4 5} -> 6 -> 7
+}")
+
+```
+-   If the score \> 0, the text has an overall 'positive opinion'
+-   If the score = 0, the text has an overall 'neutral opinion'
+-   If the score \< 0, the text has an overall 'negative opinion'\
+```{r sentiment function, eval=FALSE, include=FALSE}
+###Sentiment score obtain: create a function to count the sentiment score in the text and add score variable to the original dataset###
+
+#the Positive/Negative words Corpus available at: https://github.com/Surya-Murali/Sentiment-Analysis-of-Twitter-Data-by-Lexicon-Approach
+pos.words<-readLines("Positive-Words.txt")
+neg.words<-readLines("Negative-Words.txt")
+text<- datareview["text"]
+score.sentiment = function(sentence, pos.words, neg.words, .progress='none')
+{
+  scores = laply(sentence, function(sentence, pos.words, neg.words)
+  {
+    #Removing punctuation using global substitute
+    sentence = gsub("[[:punct:]]", "", sentence)
+    #Removing control characters
+    sentence = gsub("[[:cntrl:]]", "", sentence)
+    #Removing digits
+    sentence = gsub('\\d+', '', sentence)
+    #Error handling while trying to get the text in lower case
+    tryTolower = function(x)
+    {
+      #Create missing value
+      y = NA
+      #Try Catch error
+      try_error = tryCatch(tolower(x), error=function(e) e)
+      #If not an error
+      if (!inherits(try_error, "error"))
+        y = tolower(x)
+      return(y)
+    }
+    #Use this tryTolower function in sapply
+    sentence = sapply(sentence, tryTolower)
+    #Split sentences into words with str_split (stringr package)
+    word.list = str_split(sentence, "\\s+")
+    #Unlist produces a vector which contains all atomic components in word.list
+    words = unlist(word.list)
+    #Compare these words to the dictionaries of positive & negative words
+    pos.matches = match(words, pos.words)
+    neg.matches = match(words, neg.words)
+    #Example: If a sentence is "He is a good boy", 
+    #then, pos.matches returns: [NA, NA, NA, *some number*, NA] : the number depends on the severity of the word is my guess
+    #neg.matches returns: [NA, NA, NA, NA, NA] 
+    #So the output has NAs and numbers
+    #We just want a TRUE/FALSE value for the pos.matches & neg.matches
+    #Getting the position of the matched term or NA
+    pos.matches = !is.na(pos.matches)
+    neg.matches = !is.na(neg.matches)
+    #This would return : [F, F, F, T, F] depending on the NA or the match
+    #The TRUE or FALSE values are treated as 1/0
+    #To get the final score of the sentence:
+    score = sum(pos.matches) - sum(neg.matches)
+    return(score)
+  }, pos.words, neg.words, .progress=.progress )
+#Now the scores are put in a dataframe and returned
+scores.df = data.frame(score=scores)
+return(scores.df)
+}
+#merge it into the dataset
+textv<-as.matrix(text)
+testsentiment <- score.sentiment(textv, pos.words, neg.words)
+score <- as.matrix(testsentiment$score)
+sentiment_data <- cbind(datareview, score)
+save.image("~/Desktop/sentiment_data.RData")
+```
+\
+```{r distribution of score, echo=FALSE}
+plot(density(sentiment_data$score), col = "skyblue", main = "Density Plot of Sentiment score", xlab = "score",xlim=(c(-20,35)))
+```
+
+```{r stats of score, eval=FALSE, include=FALSE}
+mean(score)
+min(score)
+max(score)
+```
+
+A density plot of the sentiment score is shown above. It asymptotically follows a normal distribution with a mean of 3.89. The minimum score is -66, while the maximum score is 57. It implies most of the users hold positive opinions, which is in line with the *stars.y* pie chart and the word cloud, indicating a relation between *score* and the response variable *stars.y*.\
+\
+
+#### *Random Forest Classification Model 2*
+
+Class Model 2 with 50 trees is constructed based on Class Model 1 with *score* included to see the impact of sentiment score. The variable importance graph is as follows:\
+
+![](ClassModel2.png){width="543"}
+
+```{r forest model 2, eval=FALSE, include=FALSE}
+ClassModel2<-randomForest(stars.y~score+average_stars+stars.x+review_count.x+fans+review_count.y+useful.x+funny.x+cool.x+latitude+longitude+is_open+compliment_plain,data=train,type="class", ntree=50, importance=T)
+varImpPlot(ClassModel2)
+```
+
+As can be seen, *score* tops the list, meaning it is the most important variable among all.\
+\
+
+### ***E. Result and Interpretation***
+
+#### *Performance*
+
+The above Class Models' performance table is shown as follows:
+
+|     Model     | OBB error rate | variables at each split | Number of tree |
+|:-------------:|:--------------:|:-----------------------:|:--------------:|
+| Class Model 1 |     41.93%     |            3            |       80       |
+| Class Model 2 |     39.04%     |            3            |       80       |
+
+Some observations do not add to the boostrap sample when constructing the model and these are referred to "out of bag data", which are useful for estimating generalization error and variable importance (Prajwala, 2015). As can be seen, model with *score* performs better with lower OBB error rate, indicating a higher accuracy for predicting.\
+
+#### *Prediction*
+
+Testing data is used to test the model's performance. In terms of accuracy and kappa, class model 2 performs better, which means the correct prediction probability and agreement between sets of observations are relatively high. As can be seen in the table below, including sentiment scores improves the model's performance by 2.44% in accuracy.
+
+|  Model   | Class Model 1 | Class Model 2 |
+|:--------:|:-------------:|:-------------:|
+| Accuracy |    59.73%     |    62.17%     |
+|  Kappa   |    0.3794     |    0.4218     |
+
+See the confusion matrix in the appendix, the sensitivity and accuracy for different classes diverge. For class 5, the sensitivity and balanced accuracy values are high. Take class model 2 as the case: for class 1 and 5, the model performs well. It has 82% and 86% sensitivity, 87% and 75% accuracy, and 93% and 64% specificity, respectively. But for class 2, 3, and 4, the sensitivity is 15%, 13%, and 33%, respectively, and the balanced accuracy is 56%, 55%, and 61%, respectively, which are low. The Mosaic plot of prediction and actual value is presented below:
+
+![](mosaic%20plot.png){width="632" height="263"}
+
+The rectangular tile represents a combination of levels from prediction and actual value. Tile size is proportional to the number of predictions falling into the correct actual class. As can be seen, the proportion of correct predictions of class 1 and 5 are high, followed by class 4.\
+
+#### *Interpretation*
+
+Sentiment analysis of text can improve the accuracy of predictions based on stars ratings. The classification model 2 can generate the most accurate prediction with a 62.17% probability for the testing data. For 1 and 5 stars, the true positive and negative cases are well identified by the model, as well as the accuracy rate, while stars 2 and 3 have the opposite situation.\
+\
+
+# Discussion
+
+#### *Limitation*
+
+The lexicon-corpus-based approach in sentiment analysis is unable to find opinion words with domain and context-specific orientation, and this will cause bias during the text analysis.\
+Although *average_stars* can represent the pattern of the user when he rate the business, reverse causality may still occur between *stars.y* and *average_stars*. Increasing *stars.y* will increase *average_stars*, but increasing in *average_stars* may not lead to increase in *stars*.\
+\
+
+#### *Difficulty*
+
+It is hard to determine which model fits this dataset the best. When facing with large size of data, testing all the proposed model is time consuming. Considering there are only 5 outcomes for *stars.y*, i decided to treat it as categorical and use decision tree. However, i tried different explaining variables in the model and trained many times, the accuracy of the model was still below 60% with high error rate. Then, i used sentiment analysis to assign sentiment score to the data and it improves the model performance and finally the accuracy reached above 60%.\
+\
+
+# Conclusion
+
+The classification random forest model can perform generally well in predicting users' review on businesses, especially when the actual stars ratings are 1 or 5. Sentiment score gives good implication on ratings. More advanced natural language techniques which can find opinion words with context-specific orientation are suggested for further study.\
+\
+
+# Reference
+
+Hegde, Y. and Padma, S.K., 2017, January. Sentiment analysis using random forest ensemble for mobile product reviews in Kannada. In *2017 IEEE 7th international advance computing conference (IACC)* (pp. 777-782). IEEE.
+
+Karthika, P., Murugeswari, R. and Manoranjithem, R., 2019, April. Sentiment analysis of social media network using random forest algorithm. In *2019 IEEE international conference on intelligent techniques in control, optimization and signal processing (INCOS)* (pp. 1-5). IEEE.
+
+Medhat, W., Hassan, A. and Korashy, H., 2014. *Sentiment analysis algorithms and applications: A survey.* Ain Shams engineering journal, 5(4), pp.1093-1113.
+
+Murali, S. (2018). *Sentiment-Analysis-of-Twitter-Data-by-Lexicon-Approach.* [online] GitHub. Available at: <https://github.com/Surya-Murali/Sentiment-Analysis-of-Twitter-Data-by-Lexicon-Approach/tree/master> [Accessed 27 Nov. 2023].
+
+Prajwala, T.R., 2015. A comparative study on decision tree and random forest using R tool. *International journal of advanced research in computer and communication engineering*, *4*(1), pp.196-199.
+
+Saltz, J., Sutherland, A. and Hotz, N., 2022. *Achieving Lean Data Science Agility Via Data Driven Scrum.*,Proceedings of the 55th Hawaii International Conference on System Sciences\
+\
+Yelp (2019). *Yelp Dataset*. [online] Available at: <https://www.yelp.com/dataset.>
+
+# Appendix
+
+### Class Model 1:
+
+![](Class%201%20.png){width="447"}\
+\
+
+### **Confusion Matrix of Class Model 1:**
+
+#### ![](Class%201%20confusion.png){width="455"}
+
+```{r class model 1: confusion matrix, eval=FALSE, include=FALSE}
+#forest1
+predict <- predict(forest1,newdata=test,type="class")
+confusionforest1<-confusionMatrix(predict,test$stars)
+confusionforest1
+```
+
+\
+\
+
+### **Class Model 2:**
+
+#### ![](Class%202.png){width="444"}
+
+\
+\
+
+### **Confusion Matrix of Class Model 2:**
+
+![](Class%202%20confusion.png){width="444"}
+
+```{r class model 2: confusion matrix, eval=FALSE, include=FALSE}
+#forest2
+predictionf1<-predict(forest2,newdata=test,type="class")
+confusionforest2<-confusionMatrix(predictionf1, test$stars)
+confusionforest2
+```
